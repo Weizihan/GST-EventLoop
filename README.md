@@ -170,13 +170,22 @@ EventLoop 应由外部控制线程停止和销毁，不应在自己的用户 cal
 
 ## 构建
 
-独立构建时可以关闭 GST_log：
+独立构建默认不启用 GST_log：
+
+```bash
+cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+安装到指定目录：
 
 ```bash
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
-    -DGST_EVENTLOOP_USE_GST_LOG=OFF
+    -DCMAKE_INSTALL_PREFIX=/path/to/gst-eventloop
 cmake --build build -j
+cmake --install build
 ```
 
 启用 GST_log：
@@ -201,17 +210,29 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE GST::EventLoop)
 ```
 
-如果需要 EventLoop 内部日志，配置 GST_log 路径后再加入 EventLoop：
+如果最外层工程已经创建了 `GST::Log` target，EventLoop 会直接复用它，
+不会再次加载 GST_log：
 
 ```cmake
+add_subdirectory(path/to/GST_log)
+
 set(GST_EVENTLOOP_USE_GST_LOG ON CACHE BOOL "")
-set(GST_LOG_DIR "/path/to/GST_log" CACHE PATH "")
 add_subdirectory(path/to/GST_EventLoop)
 
-target_link_libraries(my_app PRIVATE GST::EventLoop)
+target_link_libraries(my_app PRIVATE GST::Log GST::EventLoop)
 ```
 
+如果 EventLoop 独立构建时启用日志、且最外层尚未提供日志 target，EventLoop
+才会通过 `GST_LOG_DIR` 加载 GST_log。
+
 链接 `GST::EventLoop` 后，下游 target 会继承 C++17、pthread 和 EventLoop 头文件路径。
+
+### 日志配置与生命周期
+
+GST_log 由最外层应用统一配置和管理生命周期。GST_EventLoop 启用日志后，
+复用最外层提供的日志 target 和 `GstLogger` 实例，不单独执行 `init()`、
+`flush()` 或 `shutdown()`。`GST_EVENTLOOP_USE_GST_LOG` 只控制是否编译
+EventLoop 内部日志。
 
 ## 快速开始
 
