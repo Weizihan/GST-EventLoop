@@ -1,0 +1,18 @@
+# Build outputs
+build/
+build_*/
+output/
+
+# CMake generated files
+compile_commands.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
