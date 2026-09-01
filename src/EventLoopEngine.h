@@ -26,7 +26,7 @@ public:
     bool init(CallbackPoster callback_poster);
     bool run();
     void enable_dispatch();
-    void stop(bool drain_pending_io = true);
+    void stop(bool need_clean_io_tasks = false);
 
     bool register_event(
         IoToken token,
@@ -39,14 +39,15 @@ public:
     bool remove_event(std::uint64_t handle_id);
     
 private:
+    // ready和Running保证的是run之前提交任务的情况
     enum class EngineState {
-        Uninitialized,
-        Ready,
-        Starting,
-        Prepared,
-        Running,
-        Stopping,
-        Stopped
+        Uninitialized,          // 未初始化
+        Ready,                  // 初始化完成
+        Starting,               // 开始执行以后
+        Prepared,               // run执行完成
+        Running,                // io线程正式启动
+        Stopping,               // 停止中(可能会执行任务)
+        Stopped                 // 已完成停止
     };
 
     using IoStateOperation = std::function<bool()>;
@@ -101,9 +102,9 @@ private:
     bool remove_event_in_owner(std::uint64_t handle_id);
     void on_callback_finished(std::uint64_t handle_id);
 
-    std::atomic_bool _is_running{false};
-    std::atomic_bool _accepting_tasks{false};
-    std::thread      _runner;
+    std::atomic_bool _is_running{false};                    // 是否在运行
+    std::atomic_bool _accepting_tasks{false};               // 是否可接受任务
+    std::thread      _runner;                               // 主循环线程
     std::mutex       _lifecycle_mutex;
     std::condition_variable _dispatch_cv;
     bool             _dispatch_enabled{false};

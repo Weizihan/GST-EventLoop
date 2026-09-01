@@ -55,15 +55,9 @@ public:
     EventLoop(EventLoop&&) noexcept = delete;
     EventLoop& operator=(EventLoop&&) noexcept = delete;
 
-    // Lifecycle calls are serialized across external threads. Calls from this
-    // EventLoop's callback workers are rejected.
     bool init();
     bool init(const EventLoopConfig& config);
-    // Returns false when a queued startup IO operation fails; details are logged.
-    // User callbacks are enabled only after every Engine has started successfully.
     bool run();
-    // Blocking and idempotent. Concurrent callers wait for the active stop.
-    // Calls from this EventLoop's callback workers are rejected.
     void stop(ShutdownMode mode = ShutdownMode::Soft);
 
     IoHandle watch_io(const NativeHandle& native_handle, Event_type interest, IoCallback cb);

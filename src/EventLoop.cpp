@@ -77,7 +77,7 @@ bool EventLoop::init(const EventLoopConfig& config) {
                 return _callback_pool.post_batch(std::move(tasks));
             })) {
             for (const auto& initialized_engine : engines) {
-                initialized_engine->stop(false);
+                initialized_engine->stop(true);
             }
             _callback_pool.stop(false);
             std::lock_guard<std::mutex> state_lock(_state_mutex);
@@ -125,7 +125,7 @@ bool EventLoop::run() {
         if (!engines[engine_id]->run()) {
             GST_EVENTLOOP_LOG_ERROR("EventLoop startup failed engine_id=%zu", engine_id);
             for (const auto& engine : engines) {
-                engine->stop(false);
+                engine->stop(true);
             }
             _callback_pool.stop(false);
             std::lock_guard<std::mutex> state_lock(_state_mutex);
@@ -164,7 +164,7 @@ void EventLoop::stop(ShutdownMode mode) {
     }
 
     for (const auto& engine : engines) {
-        engine->stop(mode == ShutdownMode::Soft);
+        engine->stop(mode == ShutdownMode::Hard);
     }
     _callback_pool.stop(mode == ShutdownMode::Soft);
 

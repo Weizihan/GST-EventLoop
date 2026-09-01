@@ -49,7 +49,7 @@ EventLoopEngine::EventCallbacks::select(Event_type ready) const {
 }
 
 EventLoopEngine::~EventLoopEngine() {
-    stop(false);
+    stop(true);
 }
 
 bool EventLoopEngine::init(CallbackPoster callback_poster) {
@@ -137,7 +137,7 @@ void EventLoopEngine::enable_dispatch() {
     _dispatch_cv.notify_one();
 }
 
-void EventLoopEngine::stop(bool drain_pending_io) {
+void EventLoopEngine::stop(bool need_clean_io_tasks) {
     std::unique_lock<std::mutex> lifecycle_lock(_lifecycle_mutex);
     if (_state == EngineState::Uninitialized || _state == EngineState::Stopped) {
         return;
@@ -146,11 +146,12 @@ void EventLoopEngine::stop(bool drain_pending_io) {
     _state = EngineState::Stopping;
     _accepting_tasks = false;
 
-    if (!drain_pending_io) {
+    if (need_clean_io_tasks) {
         clear_io_state_tasks();
     }
 
     if (_is_running.exchange(false)) {
+        // 唤醒_runner执行stop
         wakeup();
     }
     _dispatch_cv.notify_all();
@@ -248,6 +249,7 @@ void EventLoopEngine::dispatch_events(const std::vector<ReadyEvent>& events) {
     tasks.reserve(events.size());
     handle_ids.reserve(events.size());
 
+    // 提交任务
     auto flush_tasks = [this, &tasks, &handle_ids] {
         if (tasks.empty()) {
             return;
