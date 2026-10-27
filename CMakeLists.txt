@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(GST_EventLoop VERSION 0.1.0 LANGUAGES CXX)
 
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "GST_EventLoop currently implements only the Linux backend")
+endif()
+
 include(GNUInstallDirs)
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +21,7 @@ add_library(GST_EventLoop STATIC
     src/EventLoopEngine.cpp
     src/Poller.cpp
     src/ThreadPool.cpp
+    src/NativeHandle.cpp
 )
 add_library(GST::EventLoop ALIAS GST_EventLoop)
 
@@ -31,26 +37,44 @@ find_package(Threads REQUIRED)
 target_link_libraries(GST_EventLoop PUBLIC Threads::Threads)
 
 if (GST_EVENTLOOP_USE_GST_LOG)
-    # Prefer the log target supplied by the outermost project. This keeps one
-    # process-wide GST_log instance shared by the application and its libraries.
-    # Loading the target here only satisfies the build dependency; GST_EventLoop
-    # never initializes or shuts down the process-wide logger.
     if (NOT TARGET GST::Log)
         if (NOT EXISTS "${GST_LOG_DIR}/CMakeLists.txt")
-            message(FATAL_ERROR
-                "GST_log target was not provided and GST_log was not found at ${GST_LOG_DIR}"
-            )
+            message(FATAL_ERROR "GST_log not found at ${GST_LOG_DIR}")
         endif()
-
         add_subdirectory("${GST_LOG_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/GST_log")
     endif()
-
     if (NOT TARGET GST::Log)
-        message(FATAL_ERROR "GST_log did not provide the GST::Log target")
+        message(FATAL_ERROR "GST_log did not provide GST::Log")
     endif()
-
     target_compile_definitions(GST_EventLoop PRIVATE GST_EVENTLOOP_USE_GST_LOG)
     target_link_libraries(GST_EventLoop PRIVATE GST::Log)
+endif()
+
+if (BUILD_TESTING)
+    file(GLOB test_sources CONFIGURE_DEPENDS "tests/*Tests.cpp")
+    add_executable(GST_EventLoop_tests
+        tests/TestMain.cpp
+        ${test_sources}
+    )
+    target_link_libraries(GST_EventLoop_tests PRIVATE GST::EventLoop)
+    target_compile_definitions(GST_EventLoop PRIVATE GST_EVENTLOOP_TESTING)
+    target_compile_definitions(GST_EventLoop_tests PRIVATE GST_EVENTLOOP_TESTING)
+    foreach(test_source IN LISTS test_sources)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${test_source}")
+        file(READ "${test_source}" test_contents)
+        string(REGEX MATCHALL "TEST_CASE\\([A-Za-z_][A-Za-z_0-9]*\\)" test_cases "${test_contents}")
+        foreach(test_declaration IN LISTS test_cases)
+            string(REGEX REPLACE "TEST_CASE\\(([A-Za-z_][A-Za-z_0-9]*)\\)" "\\1" test_case "${test_declaration}")
+            add_test(NAME eventloop.${test_case} COMMAND GST_EventLoop_tests ${test_case})
+            set_tests_properties(eventloop.${test_case} PROPERTIES TIMEOUT 20)
+        endforeach()
+    endforeach()
+endif()
+
+option(GST_EVENTLOOP_BUILD_EXAMPLES "Build the TCP example with a Linux resource provider" ON)
+if (GST_EVENTLOOP_BUILD_EXAMPLES)
+    add_executable(GST_EventLoop_example examples/main.cpp examples/NetworkProvider.cpp)
+    target_link_libraries(GST_EventLoop_example PRIVATE GST::EventLoop)
 endif()
 
 install(TARGETS GST_EventLoop
@@ -60,8 +84,7 @@ install(TARGETS GST_EventLoop
 install(FILES
     src/EventLoop.h
     src/EventTypes.h
-    src/IoHandle.h
-    src/IoToken.h
+    src/IoRegistration.h
     src/NativeHandle.h
     src/ThreadPool.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

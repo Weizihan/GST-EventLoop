@@ -1,16 +1,16 @@
-# Build outputs
+# 构建产物
 build/
 build_*/
 output/
 
-# CMake generated files
+# CMake 生成文件
 compile_commands.json
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
 
-# Editor / OS noise
+# 编辑器和操作系统临时文件
 .vscode/
 .idea/
 *.swp

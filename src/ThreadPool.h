@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <mutex>
-#include <queue>
+#include <list>
 #include <thread>
 #include <vector>
 
@@ -37,9 +37,9 @@ private:
 
     std::mutex              _mutex;
     std::condition_variable _cv;
-    std::queue<Task>        _tasks;
+    std::list<Task>         _tasks;
     std::vector<std::thread> _workers;
-    bool                    _stopping{false};
+    bool                    _stopping{true};
 };
 
 }

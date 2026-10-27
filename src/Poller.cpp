@@ -29,9 +29,21 @@ uint32_t to_epoll_events(Event_type interest, bool one_shot) noexcept {
 }
 
 Poller::~Poller() {
-    if (_epoll_fd >= 0) {
-        ::close(_epoll_fd);
+    close();
+}
+
+bool Poller::close() noexcept {
+    _is_running = false;
+    const int epoll_fd = _epoll_fd;
+    _epoll_fd = NativeHandle::INVALID_HANDLE;
+    if (epoll_fd < 0) {
+        return true;
     }
+    if (::close(epoll_fd) != 0) {
+        GST_EVENTLOOP_LOG_ERROR("close epoll failed: %s", std::strerror(errno));
+        return false;
+    }
+    return true;
 }
 
 bool Poller::init() {
@@ -103,17 +115,18 @@ bool Poller::remove(int native_fd) {
 std::vector<ReadyEvent> Poller::wait() {
     std::vector<epoll_event> events(100);
     while (_is_running) {
-        int ret = epoll_wait(_epoll_fd, events.data(), static_cast<int>(events.size()), -1);
+        // 即使唤醒失败，也不能让已经接受的状态任务永久阻塞。
+        int ret = epoll_wait(_epoll_fd, events.data(), static_cast<int>(events.size()), 100);
         if (ret < 0) {
             if (errno == EINTR) {
-                continue;
+                return {};
             }
             GST_EVENTLOOP_LOG_ERROR("epoll_wait failed: %s", std::strerror(errno));
             return {};
         }
 
         if (ret == 0) {
-            continue;
+            return {};
         }
 
         std::vector<ReadyEvent> ready_events;
