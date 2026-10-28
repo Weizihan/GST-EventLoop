@@ -1,4 +1,4 @@
-/* linux only */
+/* 当前仅实现 Linux 后端。 */
 
 #pragma once
 
@@ -32,6 +32,7 @@ public:
     ~Poller();
 
     bool init();
+    bool close() noexcept;
     bool add(int native_fd, PollKey key, Event_type interest, bool one_shot = false);
     bool update(int native_fd, PollKey key, Event_type interest, bool one_shot = false);
     bool remove(int native_fd);

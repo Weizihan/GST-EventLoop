@@ -41,16 +41,18 @@ bool ThreadPool::start(std::size_t thread_count) {
 }
 
 void ThreadPool::stop(bool drain_pending) {
+    std::list<Task> cancelled;
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _stopping = true;
         if (!drain_pending) {
-            std::queue<Task> empty;
-            _tasks.swap(empty);
+            cancelled.swap(_tasks);
         }
     }
 
     _cv.notify_all();
+    // 捕获对象的析构可能重入 EventLoop，不得在持有 _mutex 时销毁。
+    cancelled.clear();
 
     for (std::thread& worker : _workers) {
         if (worker.joinable()) {
@@ -66,12 +68,14 @@ bool ThreadPool::post(Task task) {
         return false;
     }
 
+    std::list<Task> prepared;
+    prepared.push_back(std::move(task));
     {
         std::lock_guard<std::mutex> lock(_mutex);
         if (_stopping) {
             return false;
         }
-        _tasks.push(std::move(task));
+        _tasks.splice(_tasks.end(), prepared);
     }
 
     _cv.notify_one();
@@ -89,6 +93,13 @@ bool ThreadPool::post_batch(std::vector<Task> tasks) {
         }
     }
 
+    // 发布前为整批任务分配节点，避免分配失败时只接受了其中一部分，
+    // 而调用方却按整批失败进行恢复。
+    std::list<Task> prepared;
+    for (Task& task : tasks) {
+        prepared.push_back(std::move(task));
+    }
+
     std::size_t notify_count = 0;
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -97,9 +108,7 @@ bool ThreadPool::post_batch(std::vector<Task> tasks) {
         }
 
         notify_count = std::min(tasks.size(), _workers.size());
-        for (Task& task : tasks) {
-            _tasks.push(std::move(task));
-        }
+        _tasks.splice(_tasks.end(), prepared);
     }
 
     for (std::size_t i = 0; i < notify_count; ++i) {
@@ -128,7 +137,7 @@ void ThreadPool::worker_main() {
             }
 
             task = std::move(_tasks.front());
-            _tasks.pop();
+            _tasks.pop_front();
         }
 
         try {
