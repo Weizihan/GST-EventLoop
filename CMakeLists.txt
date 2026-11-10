@@ -22,6 +22,10 @@ add_library(GST_EventLoop STATIC
     src/Poller.cpp
     src/ThreadPool.cpp
     src/NativeHandle.cpp
+    src/TimerEngine.cpp
+    src/TimerRegistration.cpp
+    src/TimerRegistrationState.cpp
+    src/TimerTypes.cpp
 )
 add_library(GST::EventLoop ALIAS GST_EventLoop)
 
@@ -54,6 +58,7 @@ if (BUILD_TESTING)
     file(GLOB test_sources CONFIGURE_DEPENDS "tests/*Tests.cpp")
     add_executable(GST_EventLoop_tests
         tests/TestMain.cpp
+        tests/EventLoopTestAccess.cpp
         ${test_sources}
     )
     target_link_libraries(GST_EventLoop_tests PRIVATE GST::EventLoop)
@@ -87,5 +92,7 @@ install(FILES
     src/IoRegistration.h
     src/NativeHandle.h
     src/ThreadPool.h
+    src/TimerRegistration.h
+    src/TimerTypes.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

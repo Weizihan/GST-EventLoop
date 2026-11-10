@@ -2,6 +2,7 @@
 
 #include "TestSupport.h"
 #include "EventLoopEngine.h"
+#include "TimerEngine.h"
 
 namespace GST {
 namespace BASE {
@@ -9,6 +10,24 @@ namespace BASE {
 // 注册表辅助操作只由 owner 执行；测试可在 owner 上
 // 合成 READ/WRITE 就绪批次，无需依赖线程调度时序。
 struct EventLoopTestAccess {
+    static std::shared_ptr<TimerEngine> timer_engine(EventLoop& loop);
+
+    // 钩子仅在 start 之前配置；资格钩子由任务副本持有。
+    static void timer_hooks(
+        TimerEngine& engine,
+        std::function<void()> before_post,
+        std::function<void()> after_post,
+        std::function<void()> before_callback = {},
+        std::function<void()> after_callback = {}
+    );
+
+    static std::size_t pending_timers(TimerEngine& engine);
+
+    // 只在 start 前设置；在调度锁下发通知，调用方不能阻塞或重入。
+    static void timer_wait_hook(TimerEngine& engine, std::function<void()> notify);
+
+    static std::chrono::steady_clock::time_point timer_deadline(const TimerRegistration& timer);
+
     static std::shared_ptr<EventLoopEngine> engine(EventLoop& loop, std::size_t index) {
         std::lock_guard<std::mutex> lock(loop._state_mutex);
         return index < loop._engines.size() ? loop._engines[index] : nullptr;

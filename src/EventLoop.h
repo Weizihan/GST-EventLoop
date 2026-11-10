@@ -4,6 +4,8 @@
 #include "IoRegistration.h"
 #include "NativeHandle.h"
 #include "ThreadPool.h"
+#include "TimerRegistration.h"
+#include "TimerTypes.h"
 
 #include <atomic>
 #include <cstddef>
@@ -19,6 +21,7 @@ namespace GST {
 namespace BASE {
 
 class EventLoopEngine;
+class TimerEngine;
 namespace detail { struct IoExecutionState; }
 
 enum class CallbackConcurrency {
@@ -38,6 +41,11 @@ struct IoContext {
     IoRegistration self;
 };
 
+struct TimerContext {
+    std::chrono::steady_clock::time_point deadline;
+    TimerRegistration self;
+};
+
 enum class ShutdownMode {
     Soft,
     Hard
@@ -46,6 +54,7 @@ enum class ShutdownMode {
 class EventLoop {
 public:
     using IoCallback = std::function<void(const IoContext&)>;
+    using TimerCallback = std::function<void(const TimerContext&)>;
 
     EventLoop();
     ~EventLoop();
@@ -84,8 +93,20 @@ public:
     // 成功后所有凭证副本立即失效；不等待已经取得资格的回调结束。
     bool remove(const IoRegistration& registration);
 
+    TimerRegistration add_timer(const TimerSchedule& schedule, TimerCallback cb);
+    // 业务回调及捕获退休后通知；线程不固定，不得等待所属 Loop 收尾。
+    TimerRegistration add_timer(const TimerSchedule& schedule, TimerCallback cb,
+                                std::function<void()> on_done);
+    // 同步更新后续计划；已生成的任务和已取得资格的回调可继续执行。
+    bool update_timer(const TimerRegistration& timer, const TimerSchedule& schedule);
+    // 后续生成的任务使用新回调；已有任务保留自己的回调快照。
+    bool set_timer_callback(const TimerRegistration& timer, TimerCallback cb);
+    // 不等待已经取得资格的回调；停止请求生效后返回 false。
+    bool remove(const TimerRegistration& timer);
+
 private:
     friend class IoRegistration;
+    friend class TimerRegistration;
 #ifdef GST_EVENTLOOP_TESTING
     friend struct EventLoopTestAccess;
 #endif
@@ -114,6 +135,13 @@ private:
     bool set_io_callback_impl(const IoRegistration& registration, Event_type type, IoCallback cb);
     bool update_io_impl(const IoRegistration& registration, Event_type interest);
     bool remove_impl(const IoRegistration& registration);
+    TimerRegistration add_timer_impl(const TimerSchedule& schedule, TimerCallback cb,
+                                     std::function<void()> on_done,
+                                     std::chrono::steady_clock::time_point registered_at);
+    bool update_timer_impl(const TimerRegistration& timer, const TimerSchedule& schedule,
+                           std::chrono::steady_clock::time_point updated_at);
+    bool set_timer_callback_impl(const TimerRegistration& timer, TimerCallback cb);
+    bool remove_timer_impl(const TimerRegistration& timer);
     std::shared_ptr<EventLoopEngine> reserve_engine_for_registration(
         int native_fd,
         std::uint64_t& generation,
@@ -137,6 +165,8 @@ private:
     EventLoopConfig _config;
     ThreadPool _callback_pool;
     std::vector<std::shared_ptr<EventLoopEngine>> _engines;
+    std::shared_ptr<TimerEngine> _timer_engine;
+    std::uint64_t _next_timer_id{1};
     std::atomic<std::uint64_t> _next_handle_id{1};
     std::atomic<std::size_t> _next_engine_id{0};
     std::unordered_map<int, FdRegistration> _registered_fds;

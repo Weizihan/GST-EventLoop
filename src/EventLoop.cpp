@@ -3,6 +3,8 @@
 #include "EventLoopEngine.h"
 #include "InternalLog.h"
 #include "IoRegistrationState.h"
+#include "TimerEngine.h"
+#include "TimerRegistrationState.h"
 
 #include <limits>
 #include <exception>
@@ -24,7 +26,9 @@ struct LifecycleScope {
         current_lifecycle = this;
     }
 
-    ~LifecycleScope() { current_lifecycle = previous; }
+    ~LifecycleScope() {
+        current_lifecycle = previous;
+    }
 
     static bool contains(const EventLoop* value) {
         for (auto scope = current_lifecycle; scope; scope = scope->previous) {
@@ -46,10 +50,14 @@ thread_local const EventLoop* current_access_owner = nullptr;
 struct LoopAccess {
     LoopAccess(std::shared_ptr<detail::IoExecutionState> state, EventLoop* expected)
         : execution(std::move(state)), previous(current_access_owner) {
-        if (!execution) return;
+        if (!execution) {
+            return;
+        }
         {
             std::lock_guard<std::mutex> lock(execution->access_mutex);
-            if (!execution->accepting_calls || execution->owner != expected) return;
+            if (!execution->accepting_calls || execution->owner != expected) {
+                return;
+            }
             owner = execution->owner;
             ++execution->active_calls;
         }
@@ -57,7 +65,9 @@ struct LoopAccess {
     }
 
     ~LoopAccess() {
-        if (!owner) return;
+        if (!owner) {
+            return;
+        }
         current_access_owner = previous;
         {
             std::lock_guard<std::mutex> lock(execution->access_mutex);
@@ -82,14 +92,28 @@ struct LoopAccess {
 template <typename Callback>
 struct CallbackCleanup {
     Callback& callback;
-    ~CallbackCleanup() { callback = {}; }
+    ~CallbackCleanup() {
+        callback = {};
+    }
 };
+
+std::chrono::steady_clock::time_point relative_timer_deadline(
+    std::chrono::steady_clock::time_point requested_at,
+    std::chrono::nanoseconds delay
+) {
+    using Clock = std::chrono::steady_clock;
+    const auto duration = std::chrono::ceil<Clock::duration>(delay);
+    return requested_at.time_since_epoch() > Clock::duration::max() - duration
+        ? Clock::time_point::max() : requested_at + duration;
+}
 
 }
 
 bool IoRegistration::valid() const noexcept {
     LoopAccess access(_execution.lock(), _owner);
-    if (!access.owner) return false;
+    if (!access.owner) {
+        return false;
+    }
     const auto registration = _registration.lock();
     return _owner != nullptr && _generation != 0 && _handle_id != 0 &&
            registration && registration->registered;
@@ -111,6 +135,33 @@ bool IoRegistration::cancel() const {
     return access.owner && access.owner->remove_impl(*this);
 }
 
+bool TimerRegistration::valid() const noexcept {
+    LoopAccess access(_execution.lock(), _owner);
+    if (!access.owner) {
+        return false;
+    }
+    const auto registration = _registration.lock();
+    return _owner != nullptr && _generation != 0 && _timer_id != 0 &&
+           registration && registration->registered;
+}
+
+bool TimerRegistration::update(const TimerSchedule& schedule) const {
+    const auto updated_at = std::chrono::steady_clock::now();
+    LoopAccess access(_execution.lock(), _owner);
+    return access.owner && access.owner->update_timer_impl(*this, schedule, updated_at);
+}
+
+bool TimerRegistration::set_cb(std::function<void(const TimerContext&)> cb) const {
+    LoopAccess access(_execution.lock(), _owner);
+    CallbackCleanup<std::function<void(const TimerContext&)>> cleanup{cb};
+    return access.owner && access.owner->set_timer_callback_impl(*this, std::move(cb));
+}
+
+bool TimerRegistration::cancel() const {
+    LoopAccess access(_execution.lock(), _owner);
+    return access.owner && access.owner->remove_timer_impl(*this);
+}
+
 EventLoop::EventLoop() = default;
 
 EventLoop::~EventLoop() {
@@ -125,13 +176,16 @@ EventLoop::~EventLoop() {
     stop();
     {
         std::unique_lock<std::mutex> lock(_state_mutex);
-        _stop_cv.wait(lock, [this] { return !_run_active; });
+        _stop_cv.wait(lock, [this] {
+            return !_run_active;
+        });
     }
     finish_shutdown();
 }
 
 bool EventLoop::in_managed_execution() const noexcept {
     return _callback_pool.is_worker_thread() || EventLoopEngine::is_owner_thread() ||
+           TimerEngine::is_owner_thread() ||
            LifecycleScope::contains(this) || LoopAccess::contains(this);
 }
 
@@ -196,7 +250,9 @@ bool EventLoop::init(const EventLoopConfig& config) {
         }
         {
             std::lock_guard<std::mutex> active_lock(active_loop_mutex);
-            if (active_loop != nullptr) return false;
+            if (active_loop != nullptr) {
+                return false;
+            }
             active_loop = this;
             _owns_process_slot = true;
         }
@@ -219,6 +275,7 @@ bool EventLoop::init(const EventLoopConfig& config) {
     }
 
     std::vector<std::shared_ptr<EventLoopEngine>> engines;
+    std::shared_ptr<TimerEngine> timer_engine;
     bool initialized = true;
     try {
         engines.reserve(config.engine_num);
@@ -232,6 +289,19 @@ bool EventLoop::init(const EventLoopConfig& config) {
             }
             engines.push_back(std::move(engine));
         }
+        if (initialized) {
+            timer_engine = std::make_shared<TimerEngine>();
+            initialized = timer_engine->init(
+                [this, next_generation](std::vector<ThreadPool::Task> tasks) {
+                    // 与 stop() 共用截止锁；Timer owner 另持负载，失败也不在此锁内退休。
+                    std::lock_guard<std::mutex> lock(_state_mutex);
+                    if (_destroying || _stop_requested ||
+                        _state != LifecycleState::Running || _generation != next_generation) {
+                        return false;
+                    }
+                    return _callback_pool.post_batch(std::move(tasks));
+                });
+        }
     } catch (...) {
         initialized = false;
     }
@@ -240,6 +310,9 @@ bool EventLoop::init(const EventLoopConfig& config) {
             initialized_engine->stop(false);
         }
         engines.clear();
+        if (timer_engine) {
+            timer_engine->stop();
+        }
         {
             std::lock_guard<std::mutex> state_lock(_state_mutex);
             _state = LifecycleState::Stopped;
@@ -255,6 +328,8 @@ bool EventLoop::init(const EventLoopConfig& config) {
         std::lock_guard<std::mutex> state_lock(_state_mutex);
         _config = config;
         _engines = std::move(engines);
+        _timer_engine = std::move(timer_engine);
+        _next_timer_id = 1;
         _next_handle_id = 1;
         _next_engine_id = 0;
         clear_registrations_locked();
@@ -262,7 +337,10 @@ bool EventLoop::init(const EventLoopConfig& config) {
         previous_execution = std::move(_execution_state);
         _execution_state = std::move(execution_state);
         if (_stop_requested) {
-            if (_stop_mode == ShutdownMode::Hard) _execution_state->hard_stopping = true;
+            if (_stop_mode == ShutdownMode::Hard) {
+                _execution_state->hard_stopping = true;
+            }
+            _timer_engine->request_stop();
             _state = LifecycleState::Stopping;
         } else {
             _state = LifecycleState::Ready;
@@ -281,7 +359,9 @@ bool EventLoop::start() {
     LifecycleScope lifecycle_scope(this);
     {
         std::lock_guard<std::mutex> state_lock(_state_mutex);
-        if (_destroying || _run_active) return false;
+        if (_destroying || _run_active) {
+            return false;
+        }
         if (_state == LifecycleState::Running) {
             return true;
         }
@@ -298,6 +378,13 @@ bool EventLoop::start() {
             GST_EVENTLOOP_LOG_ERROR("EventLoop startup failed engine_id=%zu", engine_id);
         }
     }
+    if (started) {
+        // IO 启动命令可能已经请求停止；保留既有 start 成功返回及停止模式。
+        std::lock_guard<std::mutex> state_lock(_state_mutex);
+        if (!_stop_requested) {
+            started = _timer_engine->run();
+        }
+    }
     if (!started) {
         stop(ShutdownMode::Hard);
         lifecycle_lock.unlock();
@@ -312,6 +399,7 @@ bool EventLoop::start() {
             for (const auto& engine : _engines) {
                 engine->enable_dispatch();
             }
+            _timer_engine->enable_dispatch();
         }
     }
     return true;
@@ -324,15 +412,21 @@ bool EventLoop::run() {
     }
     {
         std::unique_lock<std::mutex> lock(_state_mutex);
-        if (_destroying || _run_active) return false;
-        if (_state == LifecycleState::Stopped) return _generation != 0;
+        if (_destroying || _run_active) {
+            return false;
+        }
+        if (_state == LifecycleState::Stopped) {
+            return _generation != 0;
+        }
         if (_state != LifecycleState::Running &&
             !(_stop_requested && (_state == LifecycleState::Ready ||
                                   _state == LifecycleState::Stopping))) {
             return false;
         }
         _run_active = true;
-        _stop_cv.wait(lock, [this] { return _stop_requested; });
+        _stop_cv.wait(lock, [this] {
+            return _stop_requested;
+        });
     }
     finish_shutdown();
     {
@@ -346,7 +440,9 @@ bool EventLoop::run() {
 
 void EventLoop::stop(ShutdownMode mode) {
     std::lock_guard<std::mutex> lock(_state_mutex);
-    if (_state == LifecycleState::Uninitialized || _state == LifecycleState::Stopped) return;
+    if (_state == LifecycleState::Uninitialized || _state == LifecycleState::Stopped) {
+        return;
+    }
     if (mode == ShutdownMode::Hard) {
         _stop_mode = ShutdownMode::Hard;
         if (_execution_state) {
@@ -356,6 +452,9 @@ void EventLoop::stop(ShutdownMode mode) {
     }
     _stop_requested = true;
     _state = LifecycleState::Stopping;
+    if (_timer_engine) {
+        _timer_engine->request_stop();
+    }
     // 通知后不再访问 Loop 的其他成员，run 可以立即开始收尾。
     _stop_cv.notify_all();
 }
@@ -364,6 +463,7 @@ void EventLoop::finish_shutdown() {
     std::lock_guard<std::mutex> lifecycle_lock(_lifecycle_operation_mutex);
     LifecycleScope lifecycle_scope(this);
     std::vector<std::shared_ptr<EventLoopEngine>> engines;
+    std::shared_ptr<TimerEngine> timer_engine;
     std::shared_ptr<detail::IoExecutionState> execution;
     {
         std::lock_guard<std::mutex> state_lock(_state_mutex);
@@ -374,13 +474,16 @@ void EventLoop::finish_shutdown() {
         _state = LifecycleState::Stopping;
         _stop_requested = true;
         engines.swap(_engines);
+        timer_engine.swap(_timer_engine);
         execution = _execution_state;
     }
 
     if (execution) {
         std::unique_lock<std::mutex> lock(execution->access_mutex);
         execution->accepting_calls = false;
-        execution->access_cv.wait(lock, [&] { return execution->active_calls == 0; });
+        execution->access_cv.wait(lock, [&] {
+            return execution->active_calls == 0;
+        });
         execution->owner = nullptr;
     }
 #ifdef GST_EVENTLOOP_TESTING
@@ -397,6 +500,9 @@ void EventLoop::finish_shutdown() {
         }
         engine->stop(mode == ShutdownMode::Soft);
     }
+    if (timer_engine) {
+        timer_engine->stop();
+    }
     ShutdownMode mode;
     {
         std::lock_guard<std::mutex> lock(_state_mutex);
@@ -406,6 +512,7 @@ void EventLoop::finish_shutdown() {
 
     // 批次退休仍会唤醒 owner，必须在工作线程全部结束之后销毁 Engine。
     engines.clear();
+    timer_engine.reset();
     {
         std::lock_guard<std::mutex> state_lock(_state_mutex);
         clear_registrations_locked();
@@ -417,6 +524,137 @@ void EventLoop::finish_shutdown() {
 std::shared_ptr<detail::IoExecutionState> EventLoop::execution_for_access() {
     std::lock_guard<std::mutex> lock(_state_mutex);
     return _execution_state;
+}
+
+TimerRegistration EventLoop::add_timer(const TimerSchedule& schedule, TimerCallback cb) {
+    return add_timer(schedule, std::move(cb), {});
+}
+
+TimerRegistration EventLoop::add_timer(const TimerSchedule& schedule, TimerCallback cb,
+                                       std::function<void()> on_done) {
+    const auto registered_at = std::chrono::steady_clock::now();
+    LoopAccess access(execution_for_access(), this);
+    CallbackCleanup<TimerCallback> callback_cleanup{cb};
+    CallbackCleanup<std::function<void()>> done_cleanup{on_done};
+    if (!access.owner) {
+        return {};
+    }
+    return add_timer_impl(schedule, std::move(cb), std::move(on_done), registered_at);
+}
+
+TimerRegistration EventLoop::add_timer_impl(
+    const TimerSchedule& schedule,
+    TimerCallback cb,
+    std::function<void()> on_done,
+    std::chrono::steady_clock::time_point registered_at
+) {
+    if (!schedule.valid() || !cb) {
+        return {};
+    }
+    using Clock = std::chrono::steady_clock;
+    auto deadline = schedule._deadline;
+    if (schedule._relative) {
+        deadline = relative_timer_deadline(registered_at, schedule._delay);
+    }
+    const auto interval = schedule._repeat
+        ? std::chrono::ceil<Clock::duration>(schedule._delay) : Clock::duration::zero();
+
+    // 声明在状态锁之前，拒绝和异常也在解锁后销毁业务负载。
+    auto registration = std::make_shared<detail::TimerRegistrationState>();
+    registration->deadline = deadline;
+    registration->callback = std::make_shared<const TimerCallback>(std::move(cb));
+    registration->on_done = std::move(on_done);
+    std::lock_guard<std::mutex> lock(_state_mutex);
+    if (!accepts_io_locked() || !_timer_engine || _next_timer_id == 0) {
+        return {};
+    }
+    const auto timer_id = _next_timer_id++;
+    registration->execution = _execution_state;
+    TimerRegistration identity(this, _generation, timer_id, registration, _execution_state);
+    return _timer_engine->add(identity, deadline, interval, registration)
+        ? identity : TimerRegistration{};
+}
+
+bool EventLoop::update_timer(const TimerRegistration& timer, const TimerSchedule& schedule) {
+    const auto updated_at = std::chrono::steady_clock::now();
+    LoopAccess access(execution_for_access(), this);
+    return access.owner && update_timer_impl(timer, schedule, updated_at);
+}
+
+bool EventLoop::update_timer_impl(
+    const TimerRegistration& timer,
+    const TimerSchedule& schedule,
+    std::chrono::steady_clock::time_point updated_at
+) {
+    if (!schedule.valid()) {
+        return false;
+    }
+    using Clock = std::chrono::steady_clock;
+    const auto deadline = schedule._relative
+        ? relative_timer_deadline(updated_at, schedule._delay) : schedule._deadline;
+    const auto interval = schedule._repeat
+        ? std::chrono::ceil<Clock::duration>(schedule._delay) : Clock::duration::zero();
+    const auto registration = timer._registration.lock();
+    std::lock_guard<std::mutex> lock(_state_mutex);
+    if (!registration || !accepts_io_locked() || !_timer_engine ||
+        timer._owner != this || timer._generation != _generation ||
+        registration->execution != _execution_state) {
+        return false;
+    }
+    return _timer_engine->update(timer, deadline, interval, registration);
+}
+
+bool EventLoop::set_timer_callback(const TimerRegistration& timer, TimerCallback cb) {
+    LoopAccess access(execution_for_access(), this);
+    CallbackCleanup<TimerCallback> cleanup{cb};
+    return access.owner && set_timer_callback_impl(timer, std::move(cb));
+}
+
+bool EventLoop::set_timer_callback_impl(const TimerRegistration& timer, TimerCallback cb) {
+    if (!cb) {
+        return false;
+    }
+    const auto registration = timer._registration.lock();
+    if (!registration) {
+        return false;
+    }
+    // 快照构造和旧快照的最终清理都在 Loop 状态锁之外；状态保活更久。
+    auto callback = std::make_shared<const TimerCallback>(std::move(cb));
+    std::lock_guard<std::mutex> lock(_state_mutex);
+    if (!accepts_io_locked() || !_timer_engine ||
+        timer._owner != this || timer._generation != _generation ||
+        registration->execution != _execution_state) {
+        return false;
+    }
+    return _timer_engine->set_callback(registration, callback);
+}
+
+bool EventLoop::remove(const TimerRegistration& timer) {
+    LoopAccess access(execution_for_access(), this);
+    return access.owner && remove_timer_impl(timer);
+}
+
+bool EventLoop::remove_timer_impl(const TimerRegistration& timer) {
+    // 状态保活到所有内部锁释放之后；最终析构可能重入 stop/on_done。
+    const auto registration = timer._registration.lock();
+    std::lock_guard<std::mutex> state_lock(_state_mutex);
+    if (!registration || !accepts_io_locked() || !_timer_engine ||
+        timer._owner != this || timer._generation != _generation ||
+        registration->execution != _execution_state) {
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> execution_lock(_execution_state->mutex);
+        std::lock_guard<std::mutex> registration_lock(registration->mutex);
+        if (!registration->registered || registration->revoked) {
+            return false;
+        }
+        registration->revoked = true;
+        registration->registered = false;
+    }
+    // 删除 set 节点不分配，也不等待 owner 或正在执行的用户函数。
+    _timer_engine->remove(registration, timer._timer_id);
+    return true;
 }
 
 IoRegistration EventLoop::watch_io(
@@ -436,7 +674,9 @@ IoRegistration EventLoop::watch_io(
     LoopAccess access(execution_for_access(), this);
     CallbackCleanup<IoCallback> callback_cleanup{cb};
     CallbackCleanup<std::function<void()>> done_cleanup{on_done};
-    if (!access.owner) return {};
+    if (!access.owner) {
+        return {};
+    }
     return watch_io_impl(native_handle, interest, std::move(cb), std::move(on_done));
 }
 
