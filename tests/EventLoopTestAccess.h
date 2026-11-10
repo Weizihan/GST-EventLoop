@@ -1,8 +1,15 @@
 #pragma once
 
-#include "TestSupport.h"
+#include "EventLoop.h"
 #include "EventLoopEngine.h"
 #include "TimerEngine.h"
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
 
 namespace GST {
 namespace BASE {
@@ -28,104 +35,44 @@ struct EventLoopTestAccess {
 
     static std::chrono::steady_clock::time_point timer_deadline(const TimerRegistration& timer);
 
-    static std::shared_ptr<EventLoopEngine> engine(EventLoop& loop, std::size_t index) {
-        std::lock_guard<std::mutex> lock(loop._state_mutex);
-        return index < loop._engines.size() ? loop._engines[index] : nullptr;
-    }
+    static std::shared_ptr<EventLoopEngine> engine(EventLoop& loop, std::size_t index);
 
-    static void hooks(EventLoopEngine& engine, std::function<void()> before,
-                      std::function<void()> after,
-                      std::function<void()> published = {}) {
-        engine._before_callback_begin = std::move(before);
-        engine._after_callback_begin = std::move(after);
-        engine._after_callback_batch_published = std::move(published);
-    }
+    static void hooks(
+        EventLoopEngine& engine,
+        std::function<void()> before,
+        std::function<void()> after,
+        std::function<void()> published = {}
+    );
 
-    static void stop_hook(EventLoop& loop, std::function<void()> hook) {
-        loop._execution_state->after_stop_cutoff = std::move(hook);
-    }
+    static void stop_hook(EventLoop& loop, std::function<void()> hook);
 
-    static IoRegistration registration(EventLoopEngine& engine, std::uint64_t id) {
-        IoRegistration result;
-        TEST_CHECK(engine.submit_io_state_task([&] {
-            const auto it = engine._registrations.find(id);
-            if (it == engine._registrations.end()) return false;
-            result = it->second.identity;
-            return true;
-        }));
-        return result;
-    }
+    static IoRegistration registration(EventLoopEngine& engine, std::uint64_t id);
 
-    static EventLoopEngine::Task prepare(EventLoopEngine& engine, std::uint64_t id,
-                                         Event_type ready) {
-        EventLoopEngine::Task result;
-        TEST_CHECK(engine.submit_io_state_task([&] {
-            const auto it = engine._registrations.find(id);
-            if (it == engine._registrations.end()) return false;
-            it->second.interest = ready;
-            std::uint64_t selected = 0;
-            return engine.prepare_callback_task({id, ready}, result, selected);
-        }));
-        return result;
-    }
+    static EventLoopEngine::Task prepare(
+        EventLoopEngine& engine,
+        std::uint64_t id,
+        Event_type ready
+    );
 
-    static bool stale_event_ignored(EventLoopEngine& engine, std::uint64_t id) {
-        bool ignored = false;
-        TEST_CHECK(engine.submit_io_state_task([&] {
-            EventLoopEngine::Task result;
-            std::uint64_t selected = 0;
-            ignored = !engine.prepare_callback_task(
-                {id, Event_type::READ_EVENT}, result, selected);
-            return true;
-        }));
-        return ignored;
-    }
+    static bool stale_event_ignored(EventLoopEngine& engine, std::uint64_t id);
 
-    static bool submit(EventLoopEngine& engine, std::function<bool()> operation) {
-        return engine.submit_io_state_task(std::move(operation));
-    }
+    static bool submit(EventLoopEngine& engine, std::function<bool()> operation);
 
-    static std::unique_lock<std::mutex> hold_io_queue(EventLoopEngine& engine) {
-        return std::unique_lock<std::mutex>(engine._io_state_mutex);
-    }
+    static std::unique_lock<std::mutex> hold_io_queue(EventLoopEngine& engine);
 
-    static bool removal_pending(const IoRegistration& registration) {
-        const auto state = registration._registration.lock();
-        return state && state->removal_pending.load();
-    }
+    static bool removal_pending(const IoRegistration& registration);
 
-    static std::size_t routes(EventLoop& loop) {
-        std::lock_guard<std::mutex> lock(loop._state_mutex);
-        return loop._registration_fds.size();
-    }
+    static std::size_t routes(EventLoop& loop);
 
-    static bool post_worker(EventLoop& loop, ThreadPool::Task task) {
-        return loop._callback_pool.post(std::move(task));
-    }
+    static bool post_worker(EventLoop& loop, ThreadPool::Task task);
 
-    static bool owner_running(EventLoopEngine& engine) {
-        return engine._is_running.load();
-    }
+    static bool owner_running(EventLoopEngine& engine);
 
-    static bool hard_stopping(EventLoop& loop) {
-        std::lock_guard<std::mutex> lock(loop._state_mutex);
-        return loop._execution_state->hard_stopping;
-    }
+    static bool hard_stopping(EventLoop& loop);
 
-    static bool run_active(EventLoop& loop) {
-        std::lock_guard<std::mutex> lock(loop._state_mutex);
-        return loop._run_active;
-    }
+    static bool run_active(EventLoop& loop);
 
-    static bool access_closed_with_calls_in_flight(EventLoop& loop) {
-        std::shared_ptr<detail::IoExecutionState> execution;
-        {
-            std::lock_guard<std::mutex> lock(loop._state_mutex);
-            execution = loop._execution_state;
-        }
-        std::lock_guard<std::mutex> lock(execution->access_mutex);
-        return !execution->accepting_calls && execution->active_calls != 0;
-    }
+    static bool access_closed_with_calls_in_flight(EventLoop& loop);
 };
 
 }
@@ -134,10 +81,9 @@ struct EventLoopTestAccess {
 namespace test {
 
 // 普通测试在当前线程发出停止请求，再等待 run 完成统一收尾。
-inline void finish(GST::BASE::EventLoop& loop,
-                   GST::BASE::ShutdownMode mode = GST::BASE::ShutdownMode::Soft) {
-    loop.stop(mode);
-    TEST_CHECK(loop.run());
-}
+void finish(
+    GST::BASE::EventLoop& loop,
+    GST::BASE::ShutdownMode mode = GST::BASE::ShutdownMode::Soft
+);
 
 }

@@ -20,15 +20,13 @@ struct ReadyEvent {
     PollKey    key{INVALID_POLL_KEY};
     Event_type type{Event_type::NONE};
 
-    bool valid() const noexcept {
-        return key != INVALID_POLL_KEY && type != Event_type::NONE;
-    }
+    bool valid() const noexcept;
 };
 
 
 class Poller {
 public:
-    Poller() = default;
+    Poller();
     ~Poller();
 
     bool init();

@@ -19,6 +19,9 @@ set(GST_LOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../GST_log" CACHE PATH "Path to GST
 add_library(GST_EventLoop STATIC
     src/EventLoop.cpp
     src/EventLoopEngine.cpp
+    src/EventTypes.cpp
+    src/IoRegistration.cpp
+    src/IoRegistrationState.cpp
     src/Poller.cpp
     src/ThreadPool.cpp
     src/NativeHandle.cpp
@@ -59,6 +62,7 @@ if (BUILD_TESTING)
     add_executable(GST_EventLoop_tests
         tests/TestMain.cpp
         tests/EventLoopTestAccess.cpp
+        tests/TestSupport.cpp
         ${test_sources}
     )
     target_link_libraries(GST_EventLoop_tests PRIVATE GST::EventLoop)

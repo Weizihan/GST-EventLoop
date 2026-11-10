@@ -8,6 +8,8 @@
 namespace GST {
 namespace BASE {
 
+NativeHandle::NativeHandle() noexcept = default;
+
 NativeHandle::NativeHandle(int handle) noexcept
     : _handle(handle >= 0 ? handle : INVALID_HANDLE) {
 }
@@ -35,6 +37,14 @@ int NativeHandle::native_fd() const noexcept {
     return static_cast<int>(_handle);
 }
 
+bool NativeHandle::valid() const noexcept {
+    return _handle != INVALID_HANDLE;
+}
+
+NativeHandle::operator bool() const noexcept {
+    return valid();
+}
+
 int NativeHandle::release() noexcept {
     const int handle = native_fd();
     _handle = INVALID_HANDLE;
@@ -48,6 +58,10 @@ void NativeHandle::reset(int handle) noexcept {
         ::close(static_cast<int>(_handle));
     }
     _handle = handle >= 0 ? handle : INVALID_HANDLE;
+}
+
+void NativeHandle::set_handle(int handle) noexcept {
+    reset(handle);
 }
 
 }

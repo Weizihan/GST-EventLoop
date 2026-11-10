@@ -12,26 +12,13 @@ enum class Event_type : std::uint32_t {
     ERROR_EVENT = 1u << 2
 };
 
-inline Event_type operator|(Event_type lhs, Event_type rhs) noexcept {
-    return static_cast<Event_type>(
-        static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs)
-    );
-}
+Event_type operator|(Event_type lhs, Event_type rhs) noexcept;
 
-inline Event_type& operator|=(Event_type& lhs, Event_type rhs) noexcept {
-    lhs = lhs | rhs;
-    return lhs;
-}
+Event_type& operator|=(Event_type& lhs, Event_type rhs) noexcept;
 
-inline Event_type operator&(Event_type lhs, Event_type rhs) noexcept {
-    return static_cast<Event_type>(
-        static_cast<std::uint32_t>(lhs) & static_cast<std::uint32_t>(rhs)
-    );
-}
+Event_type operator&(Event_type lhs, Event_type rhs) noexcept;
 
-inline bool has_event(Event_type value, Event_type flag) noexcept {
-    return (static_cast<std::uint32_t>(value) & static_cast<std::uint32_t>(flag)) != 0;
-}
+bool has_event(Event_type value, Event_type flag) noexcept;
 
 }
 }

@@ -23,7 +23,9 @@ struct BatchFixture {
         TEST_CHECK(source.valid());
         TEST_CHECK(loop.init());
         auto watched = loop.watch_io(source, Event_type::READ_EVENT, callback,
-            [&] { done.open(); });
+            [&] {
+                done.open();
+            });
         handle.swap(watched);
         TEST_CHECK(handle.valid());
         TEST_CHECK(loop.set_io_callback(handle, Event_type::WRITE_EVENT, callback));
@@ -35,20 +37,29 @@ struct BatchFixture {
         return EventLoopTestAccess::prepare(*engine, 1, ready);
     }
 
-    ~BatchFixture() { test::finish(loop, ShutdownMode::Hard); }
+    ~BatchFixture() {
+        test::finish(loop, ShutdownMode::Hard);
+    }
 };
 
 }
 
 TEST_CASE(engine_remove_before_single_callback_qualification) {
     std::atomic_int calls{0};
-    BatchFixture fixture([&](const IoContext&) { ++calls; });
+    BatchFixture fixture([&](const IoContext&) {
+        ++calls;
+    });
     test::Gate before;
     test::Gate release;
     EventLoopTestAccess::hooks(*fixture.engine,
-        [&] { before.open(); release.wait(); }, {});
+        [&] {
+            before.open();
+            release.wait();
+        }, {});
     auto task = fixture.prepare(Event_type::READ_EVENT);
-    std::thread worker([&] { task(); });
+    std::thread worker([&] {
+        task();
+    });
     before.wait();
     TEST_CHECK(fixture.loop.remove(fixture.handle));
     TEST_CHECK(!fixture.done.is_open());
@@ -61,13 +72,20 @@ TEST_CASE(engine_remove_before_single_callback_qualification) {
 
 TEST_CASE(engine_remove_after_qualification_allows_late_function_entry) {
     std::atomic_int calls{0};
-    BatchFixture fixture([&](const IoContext&) { ++calls; });
+    BatchFixture fixture([&](const IoContext&) {
+        ++calls;
+    });
     test::Gate qualified;
     test::Gate release;
     EventLoopTestAccess::hooks(*fixture.engine, {},
-        [&] { qualified.open(); release.wait(); });
+        [&] {
+            qualified.open();
+            release.wait();
+        });
     auto task = fixture.prepare(Event_type::READ_EVENT);
-    std::thread worker([&] { task(); });
+    std::thread worker([&] {
+        task();
+    });
     qualified.wait();
     TEST_CHECK(fixture.loop.remove(fixture.handle));
     TEST_CHECK(calls == 0);
@@ -114,11 +132,17 @@ TEST_CASE(engine_hard_during_read_cancels_unqualified_write_in_same_batch) {
             ++writes;
         }
     });
-    EventLoopTestAccess::stop_hook(fixture.loop, [&] { cutoff.open(); });
+    EventLoopTestAccess::stop_hook(fixture.loop, [&] {
+        cutoff.open();
+    });
     auto task = fixture.prepare(Event_type::READ_EVENT | Event_type::WRITE_EVENT);
-    std::thread worker([&] { task(); });
+    std::thread worker([&] {
+        task();
+    });
     entered.wait();
-    std::thread stopper([&] { test::finish(fixture.loop, ShutdownMode::Hard); });
+    std::thread stopper([&] {
+        test::finish(fixture.loop, ShutdownMode::Hard);
+    });
     cutoff.wait();
     release.open();
     worker.join();
@@ -133,14 +157,25 @@ TEST_CASE(engine_hard_after_write_qualification_preserves_callback) {
     test::Gate qualified;
     test::Gate release;
     test::Gate cutoff;
-    BatchFixture fixture([&](const IoContext&) { ++writes; });
+    BatchFixture fixture([&](const IoContext&) {
+        ++writes;
+    });
     EventLoopTestAccess::hooks(*fixture.engine, {},
-        [&] { qualified.open(); release.wait(); });
-    EventLoopTestAccess::stop_hook(fixture.loop, [&] { cutoff.open(); });
+        [&] {
+            qualified.open();
+            release.wait();
+        });
+    EventLoopTestAccess::stop_hook(fixture.loop, [&] {
+        cutoff.open();
+    });
     auto task = fixture.prepare(Event_type::WRITE_EVENT);
-    std::thread worker([&] { task(); });
+    std::thread worker([&] {
+        task();
+    });
     qualified.wait();
-    std::thread stopper([&] { test::finish(fixture.loop, ShutdownMode::Hard); });
+    std::thread stopper([&] {
+        test::finish(fixture.loop, ShutdownMode::Hard);
+    });
     cutoff.wait();
     TEST_CHECK(writes == 0);
     release.open();
@@ -154,11 +189,15 @@ TEST_CASE(engine_hard_after_write_qualification_preserves_callback) {
 TEST_CASE(engine_old_ready_event_does_not_target_replacement_registration) {
     int old_calls = 0;
     std::atomic_int new_calls{0};
-    BatchFixture fixture([&](const IoContext&) { ++old_calls; });
+    BatchFixture fixture([&](const IoContext&) {
+        ++old_calls;
+    });
     auto old_task = fixture.prepare(Event_type::READ_EVENT);
     TEST_CHECK(fixture.loop.remove(fixture.handle));
     auto replacement = fixture.loop.watch_io(fixture.source, Event_type::READ_EVENT,
-        [&](const IoContext&) { ++new_calls; });
+        [&](const IoContext&) {
+            ++new_calls;
+        });
     TEST_CHECK(replacement.valid());
     TEST_CHECK(EventLoopTestAccess::stale_event_ignored(*fixture.engine, 1));
     old_task();
@@ -181,7 +220,9 @@ TEST_CASE(engine_same_registration_does_not_overlap_callback_batches) {
         release.wait();
     });
     auto first = fixture.prepare(Event_type::READ_EVENT);
-    std::thread worker([&] { first(); });
+    std::thread worker([&] {
+        first();
+    });
     entered.wait();
     // 首个批次尚未结束时，在 owner 侧再次查询就绪状态。
     TEST_CHECK(EventLoopTestAccess::stale_event_ignored(*fixture.engine, 1));
@@ -196,10 +237,14 @@ TEST_CASE(engine_same_registration_does_not_overlap_callback_batches) {
 TEST_CASE(engine_callback_replacement_preserves_already_prepared_batch_snapshot) {
     std::atomic_int old_calls{0};
     std::atomic_int new_calls{0};
-    BatchFixture fixture([&](const IoContext&) { ++old_calls; });
+    BatchFixture fixture([&](const IoContext&) {
+        ++old_calls;
+    });
     auto task = fixture.prepare(Event_type::READ_EVENT);
     TEST_CHECK(fixture.handle.set_cb(Event_type::READ_EVENT,
-        [&](const IoContext&) { ++new_calls; }));
+        [&](const IoContext&) {
+            ++new_calls;
+        }));
     // 已排队批次持有旧回调副本，替换只影响后续组装的新批次。
     task();
     task = {};

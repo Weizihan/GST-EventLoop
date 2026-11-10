@@ -10,6 +10,8 @@ thread_local const ThreadPool* current_worker_pool = nullptr;
 
 }
 
+ThreadPool::ThreadPool() = default;
+
 ThreadPool::~ThreadPool() {
     stop();
 }

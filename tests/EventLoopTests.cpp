@@ -49,7 +49,11 @@ void consume_source(const NativeHandle& source) {
 
 struct DestructionAction {
     std::function<void()> action;
-    ~DestructionAction() { if (action) action(); }
+    ~DestructionAction() {
+        if (action) {
+            action();
+        }
+    }
 };
 
 void queued_callback_stop(ShutdownMode mode, bool should_run) {
@@ -70,22 +74,35 @@ void queued_callback_stop(ShutdownMode mode, bool should_run) {
             consume_source(first_source);
             entered.open();
             release.wait();
-        }, [&] { first_done.open(); });
+        }, [&] {
+            first_done.open();
+        });
     auto second = loop.watch_io(second_source, Event_type::READ_EVENT,
-        [&](const IoContext&) { consume_source(second_source); ++calls; },
-        [&] { second_done.open(); });
+        [&](const IoContext&) {
+            consume_source(second_source);
+            ++calls;
+        },
+        [&] {
+            second_done.open();
+        });
     TEST_CHECK(first.valid() && second.valid());
     auto engine = EventLoopTestAccess::engine(loop, 0);
     EventLoopTestAccess::hooks(*engine, {}, {}, [&] {
-        if (++published == 2) second_accepted.open();
+        if (++published == 2) {
+            second_accepted.open();
+        }
     });
-    EventLoopTestAccess::stop_hook(loop, [&] { cutoff.open(); });
+    EventLoopTestAccess::stop_hook(loop, [&] {
+        cutoff.open();
+    });
     TEST_CHECK(loop.start());
     signal_source(first_source);
     entered.wait();
     signal_source(second_source);
     second_accepted.wait();
-    std::thread stopper([&] { test::finish(loop, mode); });
+    std::thread stopper([&] {
+        test::finish(loop, mode);
+    });
     cutoff.wait();
     release.open();
     stopper.join();
@@ -138,7 +155,11 @@ TEST_CASE(loop_pending_remove_cancels_before_start) {
     std::atomic_int calls{0};
     test::Gate done;
     auto handle = loop.watch_io(source, Event_type::READ_EVENT,
-        [&](const IoContext&) { ++calls; }, [&] { done.open(); });
+        [&](const IoContext&) {
+            ++calls;
+        }, [&] {
+            done.open();
+        });
     const auto copy = handle;
     TEST_CHECK(handle.valid());
     TEST_CHECK(loop.remove(handle));
@@ -163,7 +184,10 @@ TEST_CASE(loop_registration_copy_assignment_move_and_weak_ownership) {
     TEST_CHECK(!loop.set_io_callback(empty, Event_type::READ_EVENT,
                                      [](const IoContext&) {}));
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { done.open(); });
+        [](const IoContext&) {
+        }, [&] {
+            done.open();
+        });
     const auto copy = registration;
     IoRegistration assigned;
     assigned = copy;
@@ -196,7 +220,10 @@ TEST_CASE(loop_registration_copy_remove_invalidates_all_copies) {
     TEST_CHECK(loop.init());
     test::Gate done;
     auto handle = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { done.open(); });
+        [](const IoContext&) {
+        }, [&] {
+            done.open();
+        });
     TEST_CHECK(loop.start());
     auto engine = EventLoopTestAccess::engine(loop, 0);
     const auto registration = EventLoopTestAccess::registration(*engine, 1);
@@ -226,7 +253,9 @@ TEST_CASE(loop_callback_self_remove) {
             TEST_CHECK(!self_copy.valid());
             TEST_CHECK(!done.is_open());
             called.open();
-        }, [&] { done.open(); });
+        }, [&] {
+            done.open();
+        });
     outside_copy = handle;
     TEST_CHECK(loop.start());
     signal_source(source);
@@ -244,7 +273,10 @@ TEST_CASE(loop_registration_rejects_operations_through_another_loop) {
     TEST_CHECK(!second.init());
     test::Gate done;
     auto registration = first.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { done.open(); });
+        [](const IoContext&) {
+        }, [&] {
+            done.open();
+        });
     const auto copy = registration;
     TEST_CHECK(first.start());
     TEST_CHECK(!second.remove(copy));
@@ -273,7 +305,10 @@ TEST_CASE(loop_stop_and_reinitialization_keep_old_registration_copies_invalid) {
     TEST_CHECK(loop.init());
     std::atomic_int done{0};
     auto old_registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { ++done; });
+        [](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     const auto old_copy = old_registration;
     TEST_CHECK(loop.start());
     test::finish(loop);
@@ -281,7 +316,10 @@ TEST_CASE(loop_stop_and_reinitialization_keep_old_registration_copies_invalid) {
     TEST_CHECK(done == 1);
     TEST_CHECK(loop.init());
     auto current = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { ++done; });
+        [](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(current.valid());
     TEST_CHECK(!loop.remove(old_copy));
     TEST_CHECK(!loop.update_io(old_copy, Event_type::WRITE_EVENT));
@@ -306,7 +344,10 @@ TEST_CASE(loop_running_remove_does_not_wait_for_callback) {
             entered.open();
             release.wait();
             TEST_CHECK(fcntl(source.native_fd(), F_GETFD) >= 0);
-        }, [&] { source.reset(); done.open(); });
+        }, [&] {
+            source.reset();
+            done.open();
+        });
     TEST_CHECK(loop.start());
     signal_source(source);
     entered.wait();
@@ -325,14 +366,27 @@ TEST_CASE(loop_concurrent_registration_copies_remove_succeeds_once) {
     TEST_CHECK(loop.init());
     std::atomic_int done{0};
     auto handle = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { ++done; });
+        [](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(loop.start());
     const auto first_copy = handle;
     const auto second_copy = handle;
     test::Gate start;
     std::atomic_int successes{0};
-    std::thread first([&] { start.wait(); if (loop.remove(first_copy)) ++successes; });
-    std::thread second([&] { start.wait(); if (loop.remove(second_copy)) ++successes; });
+    std::thread first([&] {
+        start.wait();
+        if (loop.remove(first_copy)) {
+            ++successes;
+        }
+    });
+    std::thread second([&] {
+        start.wait();
+        if (loop.remove(second_copy)) {
+            ++successes;
+        }
+    });
     start.open();
     first.join();
     second.join();
@@ -349,7 +403,10 @@ TEST_CASE(loop_pending_concurrent_registration_remove_claims_once_before_enqueue
     TEST_CHECK(loop.init());
     std::atomic_int done{0};
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { ++done; });
+        [](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     const auto first_copy = registration;
     const auto second_copy = registration;
     auto engine = EventLoopTestAccess::engine(loop, 0);
@@ -392,7 +449,11 @@ TEST_CASE(loop_registration_remove_allocation_failure_releases_claim_for_retry) 
     test::Gate done;
     std::atomic_int completions{0};
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [](const IoContext&) {}, [&] { ++completions; done.open(); });
+        [](const IoContext&) {
+        }, [&] {
+            ++completions;
+            done.open();
+        });
     const auto copy = registration;
     TEST_CHECK(loop.start());
     bool allocation_failed = false;
@@ -432,7 +493,9 @@ TEST_CASE(loop_callback_exception_still_completes) {
             TEST_CHECK(loop.remove(context.self));
             called.open();
             throw std::runtime_error("expected");
-        }, [&] { done.open(); });
+        }, [&] {
+            done.open();
+        });
     TEST_CHECK(loop.start());
     signal_source(source);
     called.wait();
@@ -455,10 +518,15 @@ TEST_CASE(loop_done_waits_for_callback_capture_destruction) {
         TEST_CHECK(fcntl(source.native_fd(), F_GETFD) >= 0);
     };
     auto handle = loop.watch_io(source, Event_type::READ_EVENT,
-        [probe](const IoContext&) {}, [&] { done.open(); });
+        [probe](const IoContext&) {
+        }, [&] {
+            done.open();
+        });
     probe.reset();
     TEST_CHECK(loop.start());
-    std::thread remover([&] { TEST_CHECK(loop.remove(handle)); });
+    std::thread remover([&] {
+        TEST_CHECK(loop.remove(handle));
+    });
     destroying.wait();
     TEST_CHECK(!done.is_open());
     allow_destroy.open();
@@ -493,13 +561,21 @@ TEST_CASE(loop_external_hard_upgrades_a_soft_stop_in_progress) {
             consume_source(first_source);
             entered.open();
             release.wait();
-        }, [&] { ++done; });
+        }, [&] {
+            ++done;
+        });
     auto second = loop.watch_io(second_source, Event_type::READ_EVENT,
-        [&](const IoContext&) { ++calls; }, [&] { ++done; });
+        [&](const IoContext&) {
+            ++calls;
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(first.valid() && second.valid());
     auto engine = EventLoopTestAccess::engine(loop, 0);
     EventLoopTestAccess::hooks(*engine, {}, {}, [&] {
-        if (++published == 2) accepted.open();
+        if (++published == 2) {
+            accepted.open();
+        }
     });
     EventLoopTestAccess::stop_hook(loop, [&] {
         soft_entered.open();
@@ -510,9 +586,13 @@ TEST_CASE(loop_external_hard_upgrades_a_soft_stop_in_progress) {
     entered.wait();
     signal_source(second_source);
     accepted.wait();
-    std::thread soft([&] { test::finish(loop, ShutdownMode::Soft); });
+    std::thread soft([&] {
+        test::finish(loop, ShutdownMode::Soft);
+    });
     soft_entered.wait();
-    std::thread hard([&] { loop.stop(ShutdownMode::Hard); });
+    std::thread hard([&] {
+        loop.stop(ShutdownMode::Hard);
+    });
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     // 直接观察实际的原子截止点，不根据经过时间推断；
     // 超时仅用于发现 Hard 停止请求卡住。
@@ -551,17 +631,25 @@ TEST_CASE(loop_kernel_read_write_batch_obeys_hard_cutoff) {
             } else {
                 ++writes;
             }
-        }, [&] { ++done; });
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(handle.valid());
     auto engine = EventLoopTestAccess::engine(loop, 0);
-    EventLoopTestAccess::hooks(*engine, [&] { ++attempts; }, {});
-    EventLoopTestAccess::stop_hook(loop, [&] { cutoff.open(); });
+    EventLoopTestAccess::hooks(*engine, [&] {
+        ++attempts;
+    }, {});
+    EventLoopTestAccess::stop_hook(loop, [&] {
+        cutoff.open();
+    });
     // 首次真实 epoll 等待前已有未读数据和空发送缓冲区，即读写均就绪。
     // before 钩子统计两个已选回调的资格申请尝试。
     signal_source(peer);
     TEST_CHECK(loop.start());
     entered.wait();
-    std::thread stopper([&] { test::finish(loop, ShutdownMode::Hard); });
+    std::thread stopper([&] {
+        test::finish(loop, ShutdownMode::Hard);
+    });
     cutoff.wait();
     release.open();
     stopper.join();
@@ -611,14 +699,23 @@ TEST_CASE(loop_hard_cutoff_applies_to_engines_before_their_stop_steps) {
             consume_source(first_source);
             first_entered.open();
             release_first.wait();
-        }, [&] { ++done; });
+        }, [&] {
+            ++done;
+        });
     auto second = loop.watch_io(second_source, Event_type::READ_EVENT,
-        [&](const IoContext&) { consume_source(second_source); ++calls; },
-        [&] { ++done; });
+        [&](const IoContext&) {
+            consume_source(second_source);
+            ++calls;
+        },
+        [&] {
+            ++done;
+        });
     TEST_CHECK(first.valid() && second.valid());
     auto first_engine = EventLoopTestAccess::engine(loop, 0);
     auto second_engine = EventLoopTestAccess::engine(loop, 1);
-    EventLoopTestAccess::hooks(*second_engine, {}, {}, [&] { second_accepted.open(); });
+    EventLoopTestAccess::hooks(*second_engine, {}, {}, [&] {
+        second_accepted.open();
+    });
     EventLoopTestAccess::stop_hook(loop, [&] {
         cutoff.open();
         allow_engine_stops.wait();
@@ -628,8 +725,12 @@ TEST_CASE(loop_hard_cutoff_applies_to_engines_before_their_stop_steps) {
     first_entered.wait();
     signal_source(second_source);
     second_accepted.wait();
-    TEST_CHECK(EventLoopTestAccess::post_worker(loop, [&] { pool_barrier.open(); }));
-    std::thread stopper([&] { test::finish(loop, ShutdownMode::Hard); });
+    TEST_CHECK(EventLoopTestAccess::post_worker(loop, [&] {
+        pool_barrier.open();
+    }));
+    std::thread stopper([&] {
+        test::finish(loop, ShutdownMode::Hard);
+    });
     cutoff.wait();
     TEST_CHECK(EventLoopTestAccess::owner_running(*first_engine));
     TEST_CHECK(EventLoopTestAccess::owner_running(*second_engine));
@@ -655,9 +756,15 @@ TEST_CASE(loop_two_owners_reject_cross_remove_during_capture_destruction) {
     auto first_probe = std::make_shared<DestructionAction>();
     auto second_probe = std::make_shared<DestructionAction>();
     auto first = loop.watch_io(first_source, Event_type::READ_EVENT,
-        [first_probe](const IoContext&) {}, [&] { ++done; });
+        [first_probe](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     auto second = loop.watch_io(second_source, Event_type::READ_EVENT,
-        [second_probe](const IoContext&) {}, [&] { ++done; });
+        [second_probe](const IoContext&) {
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(first.valid() && second.valid());
     TEST_CHECK(loop.start());
     const auto first_registration = EventLoopTestAccess::registration(

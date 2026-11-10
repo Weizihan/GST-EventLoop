@@ -36,7 +36,9 @@ std::size_t thread_count() {
     TEST_CHECK(directory != nullptr);
     std::size_t count = 0;
     while (const auto entry = readdir(directory)) {
-        if (entry->d_name[0] != '.') ++count;
+        if (entry->d_name[0] != '.') {
+            ++count;
+        }
     }
     TEST_CHECK(closedir(directory) == 0);
     return count;
@@ -53,7 +55,11 @@ void await_state(Predicate predicate) {
 
 struct DestructionAction {
     std::function<void()> action;
-    ~DestructionAction() { if (action) action(); }
+    ~DestructionAction() {
+        if (action) {
+            action();
+        }
+    }
 };
 
 }
@@ -149,7 +155,9 @@ TEST_CASE(lifecycle_run_waits_for_other_thread_stop_and_callback_cleanup) {
             consume_source(source);
             entered.open();
             release.wait();
-        }, [&] { done.open(); });
+        }, [&] {
+            done.open();
+        });
     TEST_CHECK(loop.start());
     signal_source(source);
     entered.wait();
@@ -157,7 +165,9 @@ TEST_CASE(lifecycle_run_waits_for_other_thread_stop_and_callback_cleanup) {
         TEST_CHECK(loop.run());
         returned.open();
     });
-    await_state([&] { return EventLoopTestAccess::run_active(loop); });
+    await_state([&] {
+        return EventLoopTestAccess::run_active(loop);
+    });
     TEST_CHECK(!returned.is_open());
     // 已获资格的回调仍阻塞；stop 必须只提交请求，不能等它结束。
     loop.stop(ShutdownMode::Hard);
@@ -178,7 +188,11 @@ TEST_CASE(lifecycle_stop_before_start_cleans_pending_registration_in_run) {
     EventLoop loop;
     TEST_CHECK(loop.init());
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [&](const IoContext&) { ++calls; }, [&] { ++done; });
+        [&](const IoContext&) {
+            ++calls;
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(registration.valid());
     signal_source(source);
     loop.stop(ShutdownMode::Hard);
@@ -203,7 +217,9 @@ TEST_CASE(lifecycle_stop_before_run_still_completes_shared_pool) {
             consume_source(source);
             entered.open();
             release.wait();
-        }, [&] { ++done; });
+        }, [&] {
+            ++done;
+        });
     TEST_CHECK(loop.start());
     signal_source(source);
     entered.wait();
@@ -236,9 +252,13 @@ TEST_CASE(lifecycle_destructor_waits_for_callback_and_capture_before_releasing_s
             consume_source(source);
             entered.open();
             release_callback.wait();
-        }, [&] { ++done; });
+        }, [&] {
+            ++done;
+        });
     capture.reset();
-    EventLoopTestAccess::stop_hook(*loop, [&] { shutdown.open(); });
+    EventLoopTestAccess::stop_hook(*loop, [&] {
+        shutdown.open();
+    });
     TEST_CHECK(loop->start());
     signal_source(source);
     entered.wait();
@@ -314,7 +334,11 @@ TEST_CASE(lifecycle_registration_members_share_loop_operations_and_self_cancel) 
     TEST_CHECK(!empty.update(Event_type::READ_EVENT));
     TEST_CHECK(!empty.set_cb(Event_type::READ_EVENT, [](const IoContext&) {}));
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [&](const IoContext&) { ++old_calls; }, [&] { done.open(); });
+        [&](const IoContext&) {
+            ++old_calls;
+        }, [&] {
+            done.open();
+        });
     const auto copy = registration;
     TEST_CHECK(copy.set_cb(Event_type::READ_EVENT, [&](const IoContext& context) {
         consume_source(source);
@@ -342,7 +366,10 @@ TEST_CASE(lifecycle_registration_members_are_safe_after_loop_destruction) {
         EventLoop loop;
         TEST_CHECK(loop.init());
         old = loop.watch_io(source, Event_type::READ_EVENT,
-            [](const IoContext&) {}, [&] { ++done; });
+            [](const IoContext&) {
+            }, [&] {
+                ++done;
+            });
         TEST_CHECK(old.valid());
         // 未调用 start 或 run，析构也必须结清已接受的注册。
     }
@@ -379,7 +406,10 @@ TEST_CASE(lifecycle_shutdown_waits_for_in_flight_registration_management) {
         loop.stop(ShutdownMode::Hard);
     };
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [capture](const IoContext&) {}, [&] { done.open(); });
+        [capture](const IoContext&) {
+        }, [&] {
+            done.open();
+        });
     capture.reset();
     TEST_CHECK(loop.start());
     std::thread replacer([&] {
@@ -392,7 +422,9 @@ TEST_CASE(lifecycle_shutdown_waits_for_in_flight_registration_management) {
         TEST_CHECK(loop.run());
         returned.open();
     });
-    await_state([&] { return EventLoopTestAccess::run_active(loop); });
+    await_state([&] {
+        return EventLoopTestAccess::run_active(loop);
+    });
     loop.stop();
     await_state([&] {
         return EventLoopTestAccess::access_closed_with_calls_in_flight(loop);
@@ -438,10 +470,16 @@ TEST_CASE(lifecycle_stop_during_start_is_not_overwritten_or_dispatched) {
         stopped.open();
     };
     auto registration = loop.watch_io(source, Event_type::READ_EVENT,
-        [&, capture](const IoContext&) { ++calls; }, [&] { ++done; });
+        [&, capture](const IoContext&) {
+            ++calls;
+        }, [&] {
+            ++done;
+        });
     capture.reset();
     TEST_CHECK(registration.set_cb(Event_type::READ_EVENT,
-                                   [&](const IoContext&) { ++calls; }));
+                                   [&](const IoContext&) {
+                                       ++calls;
+                                   }));
     signal_source(source);
     // owner 在 startup 队列中替换旧回调，其析构明确早于 start 返回。
     TEST_CHECK(loop.start());

@@ -10,9 +10,17 @@
 
 #else
 
-#define GST_EVENTLOOP_LOG_DEBUG(...) do { } while (false)
-#define GST_EVENTLOOP_LOG_INFO(...)  do { } while (false)
-#define GST_EVENTLOOP_LOG_WARN(...)  do { } while (false)
-#define GST_EVENTLOOP_LOG_ERROR(...) do { } while (false)
+#define GST_EVENTLOOP_LOG_DEBUG(...) \
+    do {                             \
+    } while (false)
+#define GST_EVENTLOOP_LOG_INFO(...) \
+    do {                            \
+    } while (false)
+#define GST_EVENTLOOP_LOG_WARN(...) \
+    do {                            \
+    } while (false)
+#define GST_EVENTLOOP_LOG_ERROR(...) \
+    do {                             \
+    } while (false)
 
 #endif

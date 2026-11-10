@@ -11,7 +11,7 @@ class NativeHandle {
 public:
     static constexpr int INVALID_HANDLE = -1;
 
-    NativeHandle() noexcept = default;
+    NativeHandle() noexcept;
 
     // Linux 兼容入口；资源层可在内部接管原生描述符，
     // 再以 NativeHandle 交给调用方和 EventLoop。
@@ -28,22 +28,16 @@ public:
     // Linux 兼容入口；使用 Loop 的代码无需取出原生描述符。
     int native_fd() const noexcept;
 
-    bool valid() const noexcept {
-        return _handle != INVALID_HANDLE;
-    }
+    bool valid() const noexcept;
 
-    explicit operator bool() const noexcept {
-        return valid();
-    }
+    explicit operator bool() const noexcept;
 
     // 以下原生值操作也属于 Linux 兼容入口。
     int release() noexcept;
     void reset(int handle = INVALID_HANDLE) noexcept;
 
 protected:
-    void set_handle(int handle) noexcept {
-        reset(handle);
-    }
+    void set_handle(int handle) noexcept;
 
 private:
     // 使用可容纳指针宽度的存储；当前公开的原生接管入口仍仅支持 Linux fd。

@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include <cstdio>
 #include <cstring>
 #include <exception>
 

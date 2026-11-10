@@ -28,6 +28,12 @@ uint32_t to_epoll_events(Event_type interest, bool one_shot) noexcept {
 
 }
 
+bool ReadyEvent::valid() const noexcept {
+    return key != INVALID_POLL_KEY && type != Event_type::NONE;
+}
+
+Poller::Poller() = default;
+
 Poller::~Poller() {
     close();
 }

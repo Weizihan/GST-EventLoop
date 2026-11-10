@@ -17,7 +17,7 @@ class ThreadPool {
 public:
     using Task = std::function<void()>;
 
-    ThreadPool() = default;
+    ThreadPool();
     ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;

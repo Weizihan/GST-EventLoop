@@ -222,7 +222,9 @@ int main() {
     // 只负责超时退出，不替代主线程的生命周期等待。
     std::thread watchdog([&] {
         std::unique_lock<std::mutex> lock(result.mutex);
-        if (!result.cv.wait_for(lock, std::chrono::seconds(10), [&] { return result.finished; })) {
+        if (!result.cv.wait_for(lock, std::chrono::seconds(10), [&] {
+                return result.finished;
+            })) {
             lock.unlock();
             result.finish(loop, false, "Timed out while waiting for the TCP echo");
         }

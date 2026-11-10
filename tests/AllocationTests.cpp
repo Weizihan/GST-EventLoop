@@ -20,20 +20,31 @@ void test::set_allocation_failure(int allocations_before_failure) {
     fail_allocation_after = allocations_before_failure;
 }
 
-void test::clear_allocation_failure() noexcept { fail_allocation_after = -1; }
+void test::clear_allocation_failure() noexcept {
+    fail_allocation_after = -1;
+}
 
 void* operator new(std::size_t size) {
     if (fail_allocation_after == 0) {
         fail_allocation_after = -1;
         throw std::bad_alloc();
     }
-    if (fail_allocation_after > 0) --fail_allocation_after;
-    if (void* allocation = std::malloc(size == 0 ? 1 : size)) return allocation;
+    if (fail_allocation_after > 0) {
+        --fail_allocation_after;
+    }
+    if (void* allocation = std::malloc(size == 0 ? 1 : size)) {
+        return allocation;
+    }
     throw std::bad_alloc();
 }
 
-void operator delete(void* allocation) noexcept { std::free(allocation); }
-void operator delete(void* allocation, std::size_t) noexcept { std::free(allocation); }
+void operator delete(void* allocation) noexcept {
+    std::free(allocation);
+}
+
+void operator delete(void* allocation, std::size_t) noexcept {
+    std::free(allocation);
+}
 
 using namespace GST::BASE;
 
@@ -44,17 +55,24 @@ TEST_CASE(pool_allocation_failure_does_not_publish_partial_batch) {
     test::Gate release;
     std::atomic_int calls{0};
     std::atomic_int retired{0};
-    TEST_CHECK(pool.post([&] { entered.open(); release.wait(); }));
+    TEST_CHECK(pool.post([&] {
+        entered.open();
+        release.wait();
+    }));
     entered.wait();
     struct Probe {
         std::atomic_int* retired;
-        ~Probe() { ++*retired; }
+        ~Probe() {
+            ++*retired;
+        }
     };
     std::vector<ThreadPool::Task> batch;
     for (int i = 0; i != 3; ++i) {
         auto probe = std::make_shared<Probe>();
         probe->retired = &retired;
-        batch.emplace_back([probe, &calls] { ++calls; });
+        batch.emplace_back([probe, &calls] {
+            ++calls;
+        });
     }
     bool failed = false;
     test::set_allocation_failure(1);
