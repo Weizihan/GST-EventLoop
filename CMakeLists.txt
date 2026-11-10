@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
+
+if (TARGET GST::EventLoop)
+    return()
+endif()
+
+if (TARGET GST_EventLoop)
+    message(FATAL_ERROR "GST_EventLoop target already exists without the GST::EventLoop alias")
+endif()
+
 project(GST_EventLoop VERSION 0.1.0 LANGUAGES CXX)
 
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -6,15 +15,24 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 include(GNUInstallDirs)
-include(CTest)
+include(CMakePackageConfigHelpers)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(GST_EVENTLOOP_STANDALONE ON)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    include(CTest)
+    set(GST_EVENTLOOP_BUILD_TESTS_DEFAULT ${BUILD_TESTING})
+else()
+    set(GST_EVENTLOOP_STANDALONE OFF)
+    set(GST_EVENTLOOP_BUILD_TESTS_DEFAULT OFF)
+endif()
 
-option(GST_EVENTLOOP_USE_GST_LOG "Build GST_EventLoop with GST_log support" OFF)
-set(GST_LOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../GST_log" CACHE PATH "Path to GST_log")
+option(GST_EVENTLOOP_USE_GST_LOG "Build GST_EventLoop with GST-Log support" OFF)
+option(GST_EVENTLOOP_BUILD_TESTS "Build GST_EventLoop tests" ${GST_EVENTLOOP_BUILD_TESTS_DEFAULT})
+option(GST_EVENTLOOP_BUILD_EXAMPLES "Build GST_EventLoop examples" ${GST_EVENTLOOP_STANDALONE})
+if (NOT DEFINED GST_LOG_DIR)
+    set(GST_LOG_DIR "" CACHE PATH "Optional path to the GST-Log source tree")
+endif()
 
 add_library(GST_EventLoop STATIC
     src/EventLoop.cpp
@@ -31,11 +49,12 @@ add_library(GST_EventLoop STATIC
     src/TimerTypes.cpp
 )
 add_library(GST::EventLoop ALIAS GST_EventLoop)
+set_target_properties(GST_EventLoop PROPERTIES EXPORT_NAME EventLoop)
 
 target_include_directories(GST_EventLoop
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 target_compile_features(GST_EventLoop PUBLIC cxx_std_17)
@@ -45,19 +64,24 @@ target_link_libraries(GST_EventLoop PUBLIC Threads::Threads)
 
 if (GST_EVENTLOOP_USE_GST_LOG)
     if (NOT TARGET GST::Log)
-        if (NOT EXISTS "${GST_LOG_DIR}/CMakeLists.txt")
-            message(FATAL_ERROR "GST_log not found at ${GST_LOG_DIR}")
+        if (GST_LOG_DIR)
+            if (NOT EXISTS "${GST_LOG_DIR}/CMakeLists.txt")
+                message(FATAL_ERROR "GST-Log not found at ${GST_LOG_DIR}")
+            endif()
+            add_subdirectory("${GST_LOG_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/GST-Log")
+        else()
+            find_package(GSTLog CONFIG REQUIRED)
         endif()
-        add_subdirectory("${GST_LOG_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/GST_log")
     endif()
     if (NOT TARGET GST::Log)
-        message(FATAL_ERROR "GST_log did not provide GST::Log")
+        message(FATAL_ERROR "GST-Log did not provide GST::Log")
     endif()
     target_compile_definitions(GST_EventLoop PRIVATE GST_EVENTLOOP_USE_GST_LOG)
     target_link_libraries(GST_EventLoop PRIVATE GST::Log)
 endif()
 
-if (BUILD_TESTING)
+if (GST_EVENTLOOP_BUILD_TESTS)
+    enable_testing()
     file(GLOB test_sources CONFIGURE_DEPENDS "tests/*Tests.cpp")
     add_executable(GST_EventLoop_tests
         tests/TestMain.cpp
@@ -80,13 +104,12 @@ if (BUILD_TESTING)
     endforeach()
 endif()
 
-option(GST_EVENTLOOP_BUILD_EXAMPLES "Build the TCP example with a Linux resource provider" ON)
 if (GST_EVENTLOOP_BUILD_EXAMPLES)
     add_executable(GST_EventLoop_example examples/main.cpp examples/NetworkProvider.cpp)
     target_link_libraries(GST_EventLoop_example PRIVATE GST::EventLoop)
 endif()
 
-install(TARGETS GST_EventLoop
+install(TARGETS GST_EventLoop EXPORT GSTEventLoopTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
@@ -99,4 +122,26 @@ install(FILES
     src/TimerRegistration.h
     src/TimerTypes.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT GSTEventLoopTargets
+    NAMESPACE GST::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GSTEventLoop
+)
+
+set(GST_EVENTLOOP_PACKAGE_USES_GST_LOG ${GST_EVENTLOOP_USE_GST_LOG})
+configure_package_config_file(
+    cmake/GSTEventLoopConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/GSTEventLoopConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GSTEventLoop
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/GSTEventLoopConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/GSTEventLoopConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/GSTEventLoopConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GSTEventLoop
 )

@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+if (@GST_EVENTLOOP_PACKAGE_USES_GST_LOG@)
+    find_dependency(GSTLog CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/GSTEventLoopTargets.cmake")
+check_required_components(GSTEventLoop)

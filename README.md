@@ -20,7 +20,7 @@ GST_EventLoop 主要作为 `GST_net` 的底层事件驱动执行环境，也可�
 - **Timer 更新和回调快照**：Loop 与凭证提供同一 update/set_cb；新计划同步生效，已经选中的任务保留 deadline 和 callback 快照。
 - **借用 native resource**：EventLoop 监听用户提供的 `NativeHandle`，但不负责关闭它。
 - **可控停止**：外部线程和 callback 均可提出 Soft/Hard 停止请求；`run()` 等待相关工作结束并完成资源收尾。
-- **可选 GST_log 集成**：可以使用 GST_log 输出 EventLoop 内部诊断，也可以完全独立构建。
+- **可选 GST-Log 集成**：可以使用 GST-Log 输出 EventLoop 内部诊断，也可以完全独立构建。
 
 ## 适用场景
 
@@ -186,7 +186,7 @@ destroy EventLoop
 
 ## 构建
 
-独立构建时可以关闭 GST_log：
+独立构建时可以关闭 GST-Log：
 
 ```bash
 cmake -S . -B build \
@@ -195,39 +195,51 @@ cmake -S . -B build \
 cmake --build build -j
 ```
 
-启用 GST_log：
+启用源码目录中的 GST-Log：
 
 ```bash
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DGST_EVENTLOOP_USE_GST_LOG=ON \
-    -DGST_LOG_DIR=/path/to/GST_log
+    -DGST_LOG_DIR=/path/to/GST-Log
 cmake --build build -j
 ```
 
+没有设置 `GST_LOG_DIR` 时，EventLoop 会查找已经安装的 `GSTLog` CMake 包。
+
 ## CMake 接入
 
-当前推荐在同一个源码构建树中使用：
+外层工程可以先提供依赖 target，再加入 EventLoop：
 
 ```cmake
-set(GST_EVENTLOOP_USE_GST_LOG OFF CACHE BOOL "")
+add_subdirectory(path/to/GST-Log)
+set(GST_EVENTLOOP_USE_GST_LOG ON)
 add_subdirectory(path/to/GST_EventLoop)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE GST::EventLoop)
 ```
 
-如果需要 EventLoop 内部日志，配置 GST_log 路径后再加入 EventLoop：
+如果外层没有提前创建 `GST::Log`，也可以给 EventLoop 提供源码目录：
 
 ```cmake
-set(GST_EVENTLOOP_USE_GST_LOG ON CACHE BOOL "")
-set(GST_LOG_DIR "/path/to/GST_log" CACHE PATH "")
+set(GST_EVENTLOOP_USE_GST_LOG ON)
+set(GST_LOG_DIR "/path/to/GST-Log")
 add_subdirectory(path/to/GST_EventLoop)
 
 target_link_libraries(my_app PRIVATE GST::EventLoop)
 ```
 
-链接 `GST::EventLoop` 后，下游 target 会继承 C++17、pthread 和 EventLoop 头文件路径。
+EventLoop 始终优先复用外层已经存在的 `GST::Log`，不会重复加入 Log，也不会使用 `FORCE` 覆盖外层配置。重复执行 EventLoop 的 CMake 入口时，如果 `GST::EventLoop` 已经存在，也会直接复用现有 target。作为子项目时，EventLoop 的测试和示例默认关闭；外层可以显式设置 `GST_EVENTLOOP_BUILD_TESTS` 或 `GST_EVENTLOOP_BUILD_EXAMPLES`。
+
+安装后可以通过 CMake 包接入：
+
+```cmake
+find_package(GSTEventLoop CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE GST::EventLoop)
+```
+
+链接 `GST::EventLoop` 后，下游 target 会继承 C++17、pthread 和 EventLoop 头文件路径。若安装的 EventLoop 启用了 GST-Log，其包配置会同时查找 `GSTLog`，以满足静态库的链接依赖。
 
 ## 网络资源与 Loop 的用法
 
@@ -476,7 +488,7 @@ EventLoop stop 请求 → run 返回，确认收尾结束
         ↓
 停止仍可能记录日志的业务线程
         ↓
-GST_log shutdown
+GST-Log shutdown
 ```
 
 ## 与 GST_net 的关系
@@ -510,7 +522,7 @@ GST_EventLoop/
     ├── TimerRegistrationState.h   # 私有 Timer 资格与完成状态
     ├── TimerEngine.h/.cpp         # 单调时钟、条件变量和固定频率调度
     ├── EventTypes.h               # 事件类型和位运算
-    └── InternalLog.h              # 可选 GST_log 适配
+    └── InternalLog.h              # 可选 GST-Log 适配
 ```
 
 ## 故障与验证边界
